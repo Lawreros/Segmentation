@@ -4,18 +4,15 @@ This repository is meant to contain all of my experimentation with (and replicat
 ## General Repo-Specific Custom Code
 The `gen_utils` directory contains the classes and functions that I have created that perform functions that are used across the different segmentation techniques. These are mainly related to the loading/processing/sampling of input `.nii`, `.png`, and `.dcm` files and may be imported in the different notebooks.
 
-## 1. Attention Enriched Deep Learning Model for Brest Tumor Segmentation in Ultrasound Images:
+## 1. 3D U^2-Net: A 3D Universal U-Net for Multi-Domain Medical Image Segmentation:
 ```
-@ARTICLE{Vakanski2020,
-    title={Attention-Enriched Deep Learning Model for Breast Tumor Segmentation in Ultrasound Images},
-    author={Vakanski, A. and Xian, M. and Freer, P. E.},
-    journal={Ultrasound in Medicine & Biology}, 
-    year={2020},
+@ARTICLE{Huang2019,
+    title={3D U$^2$-Net: A 3D Universal U-Net for Multi-Domain Medical Image Segmentation},
+    author={Huang, C. and Han, H. and Yao, Q. and Zhu, S. and Zhou, S. K.},
+    journal={arXiv}, 
+    year={2019},
     month={Sep.},
-    volume={46},
-    number={10}
-    pages={2819-2833},
-    doi={https://doi.org/10.1016/j.ultrasmedbio.2020.06.015}
+    doi={10.48550/arXiv.1909.06012}
 }
 ```
-Contained in the `BTSU` directory. The citation for the paper is found above, with the official github repository found here: https://github.com/avakanski/Attention-Enriched-DL-Model-for-Breast-Tumor-Segmentation which uses keras (instead of the pytorch version I will be creating)
+Contained in the `u2net` directory. The citation for the paper is found above, with the official github repository found here: https://github.com/huangmozhilv/u2net_torch. The purpose of this implementation is both to improve my understanding of the use of U^2-nets, as well as provide an alternative learning example/documentation for others reading the source material.

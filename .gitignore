@@ -1,3 +1,4 @@
 data/
 gen_utils/__pycache__
 */.ipynb_checkpoints
+.vscode/settings.json

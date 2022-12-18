@@ -107,7 +107,7 @@ class ImgIE():
             raise NotImplementedError(f'Loading of png using unit value {unit} is currently not supported.')
 
 
-    def load_jpg(self, im_path: Path, unit: str='raw') -> None:
+    def load_jpg(self, im_path: Path, unit: str='raw') -> np.ndarray:
         '''Load jpg image
 
         '''
@@ -196,7 +196,11 @@ class ImgIE():
 
 
             # TODO: If image is 2D then append a third  dimension before saving(?)
-            nib.save(nib.Nifti1Image(im, np.eye(len(dim)+1)), fname)
+            if len(dim) < 4:
+                nib.save(nib.Nifti1Image(im, np.eye(len(dim)+1)), fname)
+            else:
+                #nibabel can only support up to 4-by-4 affines
+                nib.save(nib.Nifti1Image(im, np.eye(4)), fname)
             if verbose:
                 print(f'Saving: {fname}')
         elif fname.suffix == '.dcm':
@@ -210,38 +214,37 @@ class ImgIE():
 
 
 
+from skimage.transform import rotate, AffineTransform, warp, rescale, resize
+import math
+
 class ImgAug(ImgIE):
     def __init__(self) -> None:
-        #super(ImgIE, self).__init__()
+        super(ImgIE, self).__init__()
         # super().__init__()
-        pass
-
-    # def aug_run(self, inp: np.ndarray, aug_key: "OrderedDict[str, Any]", randomize: bool=False) -> None:
-    #     '''Run provided augmentation using the settings defined by the template dictionary.
-    #     Possibly work storing the various methods into a dictionary
-    #     https://stackoverflow.com/questions/9168340/using-a-dictionary-to-select-function-to-execute
-
-    #     '''
-
-    #     function_key = {'translation': self.array_translate,
-    #     'rotation': self.array_rotate,
-    #     'scale': self.array_scale,
-    #     'patch': self.img2patches}
-
-
-    #     for func, kwrd in aug_key:
-    #         if func == 'translation':
-    #             inp, label = function_key[func](inp,**kwrd)
-    #         elif func == 'rotation':
-    #             inp, label = function_key[func](inp,**kwrd)
-    #         elif func == 'scale':
-    #             inp, label = function_key[func](inp,**kwrd)
-    #         elif func == 'patch':
-    #             inp, label,  = function_key[func](inp,**kwrd)
-    #     pass
+        # pass
 
 
     def gen_random_aug(self, params: Dict[str,List[int]], float_params: bool=False, negative=True) -> Generator[Dict[str,List[int]],None, None]:
+        '''Generator which takes a dictionary of boundary vaules and returns randomly selected values within those boundaries.
+        Used for the creation of randomized augmentation parameters for other methods in this class.
+        
+        Parameters:
+        ----------
+        params : dict[str, list[int]]
+            The boundaries to be used in random augmentation parameter generation
+        float_params: bool
+            Whether the returned randomly selected values can be floats, instead of integers. Default is False
+        negative: bool
+            Whether the randomly generated values can also be negative. Thus an input value of [4] can return any value from [-4, 4].
+            Default is True
+
+        Returns
+        -------
+        out_params : dict[str, list[int or float]]
+            The randomly generated values for the input dictionary
+
+        '''
+
         while True:
             out_params = {}
             if float_params:
@@ -278,6 +281,21 @@ class ImgAug(ImgIE):
                 
             label = f'_tr{trans[0]}_{trans[1]}_{trans[2]}'
 
+        elif len(trans) == 4:
+            transform = AffineTransform(translation=(trans[1], trans[2]))
+            for j in range(dim[3]):
+                for i in range(dim[0]):
+                    im[i,:,:,j] = warp(im[i,:,:,j], transform, mode = mode)
+
+            for j in range(dim[2]):
+                for i in range(dim[1]):
+                # Because two dimensions were already translated, you can do the same thing to translate the remaining two
+                # along one dimension
+                    im[:,i,j,:] = warp(im[:,i,j,:], AffineTransform(translation=(trans[0],trans[3])), mode='symmetric')
+                
+            label = f'_tr{trans[0]}_{trans[1]}_{trans[2]}_{trans[3]}'
+
+
         else:
             raise NotImplementedError(f"Translation of objects with dimension {len(dim)} is not currently supported.")
         
@@ -286,6 +304,7 @@ class ImgAug(ImgIE):
 
     def array_rotate(self, im: np.ndarray, rot: List[int], order: int=1) -> "tuple[np.ndarray, str]":
         # TODO: Issue with low resolution not necessairly having the same dimensions
+        # TODO: Look at https://docs.scipy.org/doc/scipy/reference/generated/scipy.spatial.transform.Rotation.html#scipy.spatial.transform.Rotation
         # Rotation 2D
         dim = im.shape
 
@@ -305,6 +324,17 @@ class ImgAug(ImgIE):
             for i in range(dim[2]):
                 im[:,:,i] = rotate(im[:,:,i],rot[2], order=order)
             label = f'_rot{rot[0]}_{rot[1]}_{rot[2]}'
+
+        elif len(dim) == 4:
+            for i in range(dim[0]):
+                im[i,:,:,:] = rotate(im[i,:,:],rot[0], order=order)
+            for i in range(dim[1]):
+                im[:,i,:,:] = rotate(im[:,i,:],rot[1], order=order)
+            for i in range(dim[2]):
+                im[:,:,i,:] = rotate(im[:,:,i],rot[2], order=order)
+            for i in range(dim[3]):
+                im[:,:,:,i] = rotate(im[:,:,:,i],rot[3], order=order)
+            label = f'_rot{rot[0]}_{rot[1]}_{rot[2]}_{rot[3]}'
         
         else:
             raise NotImplementedError(f"Translation of objects with dimension {len(rot)} is not currently supported.")
@@ -336,6 +366,8 @@ class ImgAug(ImgIE):
             label = label + f'{scale[0]}_{scale[1]}'
         elif len(dim) == 3:
             label = label + f'{scale[0]}_{scale[1]}_{scale[2]}'
+        elif len(dim) == 4:
+            label = label + f'{scale[0]}_{scale[1]}_{scale[2]}_{scale[3]}'
         else:
             raise NotImplementedError(f"Translation of objects with dimension {len(scale)} is not currently supported.")
 
@@ -359,11 +391,14 @@ class ImgAug(ImgIE):
     
 
     def img2patches(self, im: np.ndarray, patch: List[int], step: List[int], fname:str, min_nonzero: float = 0,
-        slice_select: List[int] = [], save: List[str] = [], verbose=False) -> "tuple[np.ndarray, List[str], List[int]]":
-        # Depending on the number of dimenions in the `patch` value, either make 2D
-        # or 3D images
+        slice_select: bool=False, slice_idx: List[int] = [], save: List[str] = [], verbose=False) -> "tuple[np.ndarray, List[str], List[int]]":
+        # Depending on the number of dimenions in the `patch` value, either make 2D-4D image
 
         '''
+        Inputs:
+            save: List[str] List containing either none or two entries, with the first being the directory location to save the
+                files in and the second entry containing the suffix/file type to save them as.
+
         Needs:
             - image: tuple of numpy arrays? That way if you want to apply the same patching to multiple different images you can?
             - min_nonzero: [float] either a flat value or a fraction of the minimum amount of input needs to be non-zero before you keep it
@@ -390,9 +425,15 @@ class ImgAug(ImgIE):
         if len(dim) != len(step):
             raise IndexError(f'Patch selection step size of numpy array with dimensions: {dim} is not compatible with step size: {step}')
 
+        for idx, i in enumerate(patch):
+            if patch[idx] > dim[idx]:
+                raise ValueError(f'Patch value along dimension {[idx]} = {patch[idx]} and is larger than image along dimension {[idx]} = {dim[idx]}')
+
         # If they have input something for "slice_select", then they are trying to replicate patch selection
-        if len(slice_select):
+        if slice_select:
             min_nonzero = 0
+            if len(slice_idx) == 0:
+                print('WARNING: slice_select = True but slice_idx list is empty')
 
         for idx, i in enumerate(patch):
             if i == -1:
@@ -458,14 +499,35 @@ class ImgAug(ImgIE):
                                 not_blank.append(itter)
                             else:
                                 blank += 1
+
+        elif len(dim) == 4:
+            stack = np.zeros((patch_count,patch[0],patch[1], patch[2], patch[3]))
+            print(f'stack size = {stack.shape}')
+
+            for i in range(0,dim[0],step[0]):
+                for j in range(0,dim[1],step[1]):
+                    for k in range(0,dim[2],step[2]):
+                        for l in range(0, dim[3],step[3]):
+                            #itter = itter+1 #just a calculator for finding when blanks occur
+                            if i+patch[0] <= dim[0] and j+patch[1] <= dim[1] and k+patch[2] <= dim[2] and l+patch[3] <= dim[3]:
+                                itter = itter+1
+                                samp = im[i:i+patch[0],j:j+patch[1], k:k+patch[2], l:l+patch[2]]
+
+                                if min_nonzero == 0 or (samp==0).sum() <= patch_vol:
+                                    stack[cnt,:,:,:,:] = samp
+                                    cnt += 1
+                                    not_blank.append(itter)
+                                else:
+                                    blank += 1
+
         else:
-            raise IndexError(f'Images of dimension {dim} not supported by this method. Only 2D and 3D data accepted.')
+            raise IndexError(f'Images of dimension {dim} not supported by this method. Only 2D-4D data accepted.')
         
 
         fnames = []
         pnames = [] #Pnames should be used if patching is the last process you plan on doing. These are paths
         if slice_select:
-            for i in range(len(slice_select)):
+            for i in range(len(slice_idx)):
                 fnames.append(f'{save[0]}{fname}_{i}')
         else:
             for i in range(cnt):
@@ -478,7 +540,7 @@ class ImgAug(ImgIE):
 
         if save: #If they want to save the intermediate files (return a list of paths instead)
             if slice_select:
-                for idx, i in enumerate(slice_select):
+                for idx, i in enumerate(slice_idx):
                     pnames.append(self.save_image(stack[i], Path(fnames[idx]+save[1]), verbose=verbose))
             else:
                 for idx, i in enumerate(fnames):
@@ -488,7 +550,7 @@ class ImgAug(ImgIE):
         
         else:
             if slice_select:
-                return stack[slice_select], fnames, [] #Only return the patches which match slice_select
+                return stack[slice_idx], fnames, [] #Only return the patches which match slice_select
 
             else:
                 return stack[:cnt], fnames, not_blank  #Only return a stack of the patches that passed the min_nonzero check
